@@ -78,12 +78,13 @@ class PoseDetector:
                 
                 # 提取关键点和置信度
                 if len(results) > 0 and len(results[0].keypoints) > 0:
-                    keypoints = results[0].keypoints[0].cpu().numpy()
+                    keypoints = results[0].keypoints[0].cpu().numpy()  # (17, 2)
                     confidence = results[0].keypoints.conf[0].cpu().numpy()
                     
-                    # 将关键点展平为一维数组
+                    # 确保数据维度正确
                     if keypoints.shape == (17, 2):
-                        keypoints_flat = keypoints.flatten()  # 将(17,2)展平为(34,)
+                        # 将关键点展平为一维数组
+                        keypoints_flat = keypoints.flatten()  # (34,)
                         keypoints_data[frame_idx] = keypoints_flat
                         confidence_data[frame_idx] = confidence
                     else:
@@ -130,7 +131,7 @@ class PoseDetector:
             results = self.model(frame, verbose=False)
             
             if len(results) > 0 and len(results[0].keypoints) > 0:
-                keypoints = results[0].keypoints[0].cpu().numpy()
+                keypoints = results[0].keypoints[0].cpu().numpy()  # (17, 2)
                 confidence = results[0].keypoints.conf[0].cpu().numpy()
                 return keypoints, confidence
             else:
