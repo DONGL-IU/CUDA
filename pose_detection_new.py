@@ -39,7 +39,13 @@ class PoseDetector:
             video_path = Path(video_path)
             output_path = Path(output_path)
             logger.info(f"开始处理视频: {video_path}")
+            logger.info(f"输出路径: {output_path}")
             
+            # 检查视频文件是否存在
+            if not video_path.exists():
+                logger.error(f"视频文件不存在: {video_path}")
+                return
+                
             # 打开视频文件
             cap = cv2.VideoCapture(str(video_path))
             if not cap.isOpened():
@@ -61,6 +67,7 @@ class PoseDetector:
             pbar = tqdm(total=frame_count, desc="处理帧")
             
             # 处理每一帧
+            frame_idx = 0
             while True:
                 ret, frame = cap.read()
                 if not ret:
@@ -81,7 +88,12 @@ class PoseDetector:
                     keypoints_data.append(np.zeros((17, 2)))
                     confidence_data.append(np.zeros(17))
                 
+                frame_idx += 1
                 pbar.update(1)
+                
+                # 每100帧输出一次进度
+                if frame_idx % 100 == 0:
+                    logger.info(f"已处理 {frame_idx}/{frame_count} 帧")
             
             pbar.close()
             cap.release()
@@ -131,13 +143,36 @@ def main():
         # 创建姿态检测器实例
         detector = PoseDetector()
         
+        # 获取当前工作目录
+        current_dir = Path.cwd()
+        logger.info(f"当前工作目录: {current_dir}")
+        
         # 处理视频目录
-        video_dir = Path("/content/videos")  # 修改为正确的视频目录路径
-        output_dir = Path("/content/CUDA/output/detection")  # 修改为正确的输出目录路径
+        video_dir = current_dir / "videos"  # 使用相对路径
+        output_dir = current_dir / "output" / "detection"
+        
+        logger.info(f"视频目录: {video_dir}")
+        logger.info(f"输出目录: {output_dir}")
+        
+        # 检查视频目录是否存在
+        if not video_dir.exists():
+            logger.error(f"视频目录不存在: {video_dir}")
+            return
+            
+        # 创建输出目录
         output_dir.mkdir(parents=True, exist_ok=True)
         
+        # 获取所有视频文件
+        video_files = list(video_dir.glob("*.mp4"))
+        logger.info(f"找到 {len(video_files)} 个视频文件")
+        
+        if not video_files:
+            logger.error("没有找到视频文件")
+            return
+            
         # 处理所有视频文件
-        for video_path in video_dir.glob("*.mp4"):
+        for video_path in video_files:
+            logger.info(f"开始处理视频: {video_path}")
             output_path = output_dir / f"{video_path.stem}_pose.h5"
             detector.detect_video(video_path, output_path)
             
