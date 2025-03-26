@@ -60,7 +60,7 @@ class PoseDetector:
             logger.info(f"视频信息: {frame_count}帧, {fps} FPS, {width}x{height}")
             
             # 初始化结果存储
-            keypoints_data = np.zeros((frame_count, 17, 2), dtype=np.float32)
+            keypoints_data = np.zeros((frame_count, 34), dtype=np.float32)  # 17个关键点，每个点2个坐标
             confidence_data = np.zeros((frame_count, 17), dtype=np.float32)
             
             # 创建进度条
@@ -81,17 +81,18 @@ class PoseDetector:
                     keypoints = results[0].keypoints[0].cpu().numpy()
                     confidence = results[0].keypoints.conf[0].cpu().numpy()
                     
-                    # 确保数据维度正确
+                    # 将关键点展平为一维数组
                     if keypoints.shape == (17, 2):
-                        keypoints_data[frame_idx] = keypoints
+                        keypoints_flat = keypoints.flatten()  # 将(17,2)展平为(34,)
+                        keypoints_data[frame_idx] = keypoints_flat
                         confidence_data[frame_idx] = confidence
                     else:
                         logger.warning(f"帧 {frame_idx} 的关键点维度不正确: {keypoints.shape}")
-                        keypoints_data[frame_idx] = np.zeros((17, 2))
+                        keypoints_data[frame_idx] = np.zeros(34)
                         confidence_data[frame_idx] = np.zeros(17)
                 else:
                     # 如果没有检测到姿态，使用零填充
-                    keypoints_data[frame_idx] = np.zeros((17, 2))
+                    keypoints_data[frame_idx] = np.zeros(34)
                     confidence_data[frame_idx] = np.zeros(17)
                 
                 frame_idx += 1
