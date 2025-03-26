@@ -17,12 +17,22 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import logging
 import smplx
+import inspect
 
 # 设置中文字体
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
 logger = logging.getLogger(__name__)
+
+def get_function_args(func):
+    """获取函数参数的兼容性包装器"""
+    try:
+        sig = inspect.signature(func)
+        return [param.name for param in sig.parameters.values()]
+    except Exception as e:
+        logger.warning(f"无法获取函数参数信息: {str(e)}")
+        return []
 
 class Pose3DReconstructor:
     def __init__(self, device: Optional[torch.device] = None):
