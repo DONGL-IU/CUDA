@@ -16,53 +16,63 @@ logger = logging.getLogger(__name__)
 class PoseDetector:
     def __init__(self, device: Optional[torch.device] = None):
         """初始化姿态检测器"""
-        if device is None:
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        else:
-            self.device = device
+        try:
+            if device is None:
+                self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            else:
+                self.device = device
+                
+            logger.info(f"使用设备: {self.device}")
             
-        logger.info(f"使用设备: {self.device}")
-        
-        # 加载YOLOv8模型
-        self.model = YOLO('yolov8n-pose.pt')
-        self.model.to(self.device)
-        
-        # COCO关键点定义
-        self.coco_keypoints = {
-            0: 'nose',
-            1: 'left_eye',
-            2: 'right_eye',
-            3: 'left_ear',
-            4: 'right_ear',
-            5: 'left_shoulder',
-            6: 'right_shoulder',
-            7: 'left_elbow',
-            8: 'right_elbow',
-            9: 'left_wrist',
-            10: 'right_wrist',
-            11: 'left_hip',
-            12: 'right_hip',
-            13: 'left_knee',
-            14: 'right_knee',
-            15: 'left_ankle',
-            16: 'right_ankle'
-        }
-        
-        # 关键点映射（COCO到SMPL）
-        self.keypoint_mapping = {
-            5: 17,  # 左肩
-            6: 18,  # 右肩
-            7: 19,  # 左肘
-            8: 20,  # 右肘
-            9: 21,  # 左手腕
-            10: 22, # 右手腕
-            11: 23, # 左髋
-            12: 24, # 右髋
-            13: 25, # 左膝
-            14: 26, # 右膝
-            15: 27, # 左踝
-            16: 28  # 右踝
-        }
+            # 加载YOLOv8模型
+            try:
+                self.model = YOLO('yolov8n-pose.pt')
+                self.model.to(self.device)
+                logger.info("YOLO模型加载成功")
+            except Exception as e:
+                logger.error(f"YOLO模型加载失败: {str(e)}")
+                raise
+            
+            # COCO关键点定义
+            self.coco_keypoints = {
+                0: 'nose',
+                1: 'left_eye',
+                2: 'right_eye',
+                3: 'left_ear',
+                4: 'right_ear',
+                5: 'left_shoulder',
+                6: 'right_shoulder',
+                7: 'left_elbow',
+                8: 'right_elbow',
+                9: 'left_wrist',
+                10: 'right_wrist',
+                11: 'left_hip',
+                12: 'right_hip',
+                13: 'left_knee',
+                14: 'right_knee',
+                15: 'left_ankle',
+                16: 'right_ankle'
+            }
+            
+            # 关键点映射（COCO到SMPL）
+            self.keypoint_mapping = {
+                5: 17,  # 左肩
+                6: 18,  # 右肩
+                7: 19,  # 左肘
+                8: 20,  # 右肘
+                9: 21,  # 左手腕
+                10: 22, # 右手腕
+                11: 23, # 左髋
+                12: 24, # 右髋
+                13: 25, # 左膝
+                14: 26, # 右膝
+                15: 27, # 左踝
+                16: 28  # 右踝
+            }
+            
+        except Exception as e:
+            logger.error(f"初始化姿态检测器失败: {str(e)}")
+            raise
     
     def normalize_keypoints(self, keypoints, image_shape):
         """将关键点坐标归一化到[-1, 1]范围"""
