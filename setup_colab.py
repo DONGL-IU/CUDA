@@ -19,6 +19,8 @@ def activate_venv():
             raise FileNotFoundError("虚拟环境Python解释器未找到")
             
         # 将虚拟环境的Python添加到系统路径
+        os.environ["VIRTUAL_ENV"] = str(venv_python.parent.parent)
+        os.environ["PATH"] = f"{venv_python.parent}:{os.environ['PATH']}"
         sys.executable = str(venv_python)
         sys.prefix = str(venv_python.parent.parent)
         
@@ -27,7 +29,12 @@ def activate_venv():
         if site_packages.exists():
             sys.path.insert(0, str(site_packages))
             
-        logger.info("虚拟环境激活成功")
+        # 验证Python版本
+        version_check = subprocess.run([str(venv_python), "--version"], capture_output=True, text=True)
+        if "Python 3.10" not in version_check.stdout:
+            raise RuntimeError(f"虚拟环境Python版本不正确: {version_check.stdout}")
+            
+        logger.info(f"虚拟环境激活成功: {version_check.stdout.strip()}")
         return True
     except Exception as e:
         logger.error(f"激活虚拟环境失败: {str(e)}")
@@ -112,5 +119,9 @@ if __name__ == "__main__":
         # 打印当前Python环境信息
         logger.info(f"当前Python解释器: {sys.executable}")
         logger.info(f"Python版本: {sys.version}")
+        
+        # 验证Python版本
+        version_check = subprocess.run([sys.executable, "--version"], capture_output=True, text=True)
+        logger.info(f"Python版本验证: {version_check.stdout.strip()}")
     else:
         logger.error("环境配置失败") 
