@@ -132,8 +132,8 @@ def main():
         detector = PoseDetector()
         
         # 处理视频目录
-        video_dir = Path("./videos")
-        output_dir = Path("./output/detection")
+        video_dir = Path("/content/videos")  # 修改为正确的视频目录路径
+        output_dir = Path("/content/CUDA/output/detection")  # 修改为正确的输出目录路径
         output_dir.mkdir(parents=True, exist_ok=True)
         
         # 处理所有视频文件

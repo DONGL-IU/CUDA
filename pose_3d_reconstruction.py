@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import h5py
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any, Union, TypeVar
+from typing import Dict, List, Optional, Tuple, Any, Union, TypeVar, Sequence
 import logging
 from tqdm import tqdm
 from smplx import SMPL
@@ -28,7 +28,7 @@ class Pose3DReconstructor:
             # 加载SMPL模型
             logger.info("加载SMPL模型...")
             self.smpl = SMPL(
-                model_path='models/smpl',
+                model_path='/content/CUDA/models/smpl',  # 修改为正确的模型路径
                 gender='neutral',
                 batch_size=1,
                 create_global_orient=True,
