@@ -1,3 +1,18 @@
+# 兼容性补丁（必须在所有其他导入之前）
+import sys
+import inspect
+
+# 解决Python 3.11+中inspect.getargspec移除的问题
+if not hasattr(inspect, 'getargspec'):
+    inspect.getargspec = inspect.getfullargspec
+
+# 解决torch._six兼容性问题
+if sys.version_info >= (3, 11):
+    import torch
+    if hasattr(torch, '_six'):
+        torch._six.PY3 = True
+        torch._six.PY37 = False
+
 import os
 import cv2
 import torch
@@ -17,12 +32,16 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import logging
 import smplx
-import inspect
 
 # 设置中文字体
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 def get_function_args(func):
@@ -52,30 +71,7 @@ class Pose3DReconstructor:
             logger.info(f"使用设备: {self.device}")
             
             # 加载SMPL模型
-            try:
-                model_path = 'models/smpl/SMPL_NEUTRAL.pkl'
-                if not os.path.exists(model_path):
-                    logger.error(f"SMPL模型文件不存在: {model_path}")
-                    raise FileNotFoundError(f"SMPL模型文件不存在: {model_path}")
-                    
-                # 使用更稳定的配置初始化SMPL模型
-                self.model = smplx.create(
-                    model_path=model_path,
-                    model_type='smpl',
-                    gender='neutral',
-                    use_pca=False,
-                    create_global_orient=True,
-                    create_body_pose=True,
-                    create_betas=True,
-                    create_transl=True,
-                    batch_size=1
-                ).to(self.device)
-                
-                logger.info("SMPL模型加载成功")
-                
-            except Exception as e:
-                logger.error(f"SMPL模型加载失败: {str(e)}")
-                raise
+            self.load_smpl_model()
             
             # 创建输出目录
             os.makedirs("output/visualization", exist_ok=True)
@@ -95,6 +91,60 @@ class Pose3DReconstructor:
         except Exception as e:
             logger.error(f"初始化3D重建器失败: {str(e)}")
             raise
+    
+    def load_smpl_model(self):
+        """加载SMPL模型"""
+        try:
+            model_path = 'models/smpl/SMPL_NEUTRAL.pkl'
+            if not os.path.exists(model_path):
+                logger.error(f"SMPL模型文件不存在: {model_path}")
+                raise FileNotFoundError(f"SMPL模型文件不存在: {model_path}")
+            
+            # 检查Python版本兼容性
+            if sys.version_info >= (3, 11):
+                logger.info("检测到Python 3.11+，使用兼容性配置加载SMPL模型")
+                # 使用更稳定的配置初始化SMPL模型
+                self.model = smplx.create(
+                    model_path=model_path,
+                    model_type='smpl',
+                    gender='neutral',
+                    use_pca=False,
+                    batch_size=1,
+                    create_global_orient=True,
+                    create_body_pose=True,
+                    create_betas=True,
+                    create_transl=True
+                ).to(self.device)
+            else:
+                # 标准配置加载
+                self.model = smplx.create(
+                    model_path=model_path,
+                    model_type='smpl',
+                    gender='neutral',
+                    use_pca=False,
+                    batch_size=1
+                ).to(self.device)
+            
+            logger.info("SMPL模型加载成功")
+            
+        except Exception as e:
+            logger.error(f"SMPL模型加载失败: {str(e)}")
+            if 'getargspec' in str(e):
+                logger.error("检测到Python 3.11+兼容性问题，尝试应用补丁...")
+                # 应用兼容性补丁
+                if not hasattr(inspect, 'getargspec'):
+                    inspect.getargspec = inspect.getfullargspec
+                # 重新尝试加载
+                self.model = smplx.create(
+                    model_path=model_path,
+                    model_type='smpl',
+                    gender='neutral',
+                    use_pca=False,
+                    batch_size=1
+                ).to(self.device)
+                logger.info("通过兼容性补丁成功加载SMPL模型")
+            else:
+                raise
     
     def are_coordinates_similar(self, coords1, coords2):
         """检查两组坐标是否相似"""

@@ -1,3 +1,18 @@
+# 兼容性补丁（必须在所有其他导入之前）
+import sys
+import inspect
+
+# 解决Python 3.11+中inspect.getargspec移除的问题
+if not hasattr(inspect, 'getargspec'):
+    inspect.getargspec = inspect.getfullargspec
+
+# 解决torch._six兼容性问题
+if sys.version_info >= (3, 11):
+    import torch
+    if hasattr(torch, '_six'):
+        torch._six.PY3 = True
+        torch._six.PY37 = False
+
 import os
 import torch
 import logging
@@ -6,14 +21,7 @@ from pathlib import Path
 from typing import Optional, List
 import h5py
 from tqdm import tqdm
-import sys
 import shutil
-import inspect
-
-# 导入各个模块
-from pose_detection import PoseDetector
-from pose_3d_reconstruction import Pose3DReconstructor
-from parallel_merge_results import ParallelResultMerger
 
 # 配置日志
 logging.basicConfig(
@@ -21,6 +29,32 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# 导入各个模块
+try:
+    from pose_detection import PoseDetector
+    from pose_3d_reconstruction import Pose3DReconstructor
+    from parallel_merge_results import ParallelResultMerger
+    logger.info("成功导入所有模块")
+except Exception as e:
+    logger.error(f"模块导入失败: {str(e)}")
+    raise
+
+def setup_compatibility():
+    """设置全局兼容性处理"""
+    try:
+        # 检查Python版本
+        if sys.version_info >= (3, 11):
+            logger.info("检测到Python 3.11+，应用兼容性补丁")
+            # 为inspect模块添加getargspec兼容性
+            if not hasattr(inspect, 'getargspec'):
+                inspect.getargspec = inspect.getfullargspec
+                logger.info("已添加inspect.getargspec兼容性")
+    except Exception as e:
+        logger.warning(f"兼容性设置失败: {str(e)}")
+
+# 设置兼容性
+setup_compatibility()
 
 def get_function_args(func):
     """获取函数参数的兼容性包装器"""
