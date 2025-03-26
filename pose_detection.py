@@ -26,9 +26,23 @@ class PoseDetector:
             
             # 加载YOLOv8模型
             try:
-                self.model = YOLO('yolov8n-pose.pt')
+                # 使用更稳定的配置初始化YOLO模型
+                model_path = 'yolov8n-pose.pt'
+                if not os.path.exists(model_path):
+                    logger.info("下载YOLO模型...")
+                    self.model = YOLO('yolov8n-pose.pt')
+                else:
+                    self.model = YOLO(model_path)
+                
+                # 设置模型配置
+                self.model.conf = 0.25  # 置信度阈值
+                self.model.iou = 0.45   # NMS IOU阈值
+                self.model.agnostic_nms = True  # 类别无关NMS
+                
+                # 将模型移动到指定设备
                 self.model.to(self.device)
                 logger.info("YOLO模型加载成功")
+                
             except Exception as e:
                 logger.error(f"YOLO模型加载失败: {str(e)}")
                 raise

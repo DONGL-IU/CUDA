@@ -27,40 +27,56 @@ logger = logging.getLogger(__name__)
 class Pose3DReconstructor:
     def __init__(self, device: Optional[torch.device] = None):
         """初始化3D重建器"""
-        if device is None:
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        else:
-            self.device = device
+        try:
+            if device is None:
+                self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            else:
+                self.device = device
+                
+            logger.info(f"使用设备: {self.device}")
             
-        logger.info(f"使用设备: {self.device}")
-        
-        # 加载SMPL模型
-        self.model = smplx.create(
-            'models/smpl/SMPL_NEUTRAL.pkl',
-            model_type='smpl',
-            gender='neutral',
-            ext='pkl',
-            use_pca=False,
-            create_global_orient=True,
-            create_body_pose=True,
-            create_betas=True,
-            create_transl=True
-        ).to(self.device)
-        
-        # 创建输出目录
-        os.makedirs("output/visualization", exist_ok=True)
-        os.makedirs("output/opensim", exist_ok=True)
-        
-        # 初始化坐标缓存
-        self.coordinate_cache = {}
-        self.coordinate_threshold = 0.01  # 坐标差异阈值
-        
-        # 初始化线程锁
-        self.cache_lock = threading.Lock()
-        self.file_lock = threading.Lock()
-        
-        # 设置线程数
-        self.num_threads = min(8, os.cpu_count() or 1)  # 最多使用8个线程
+            # 加载SMPL模型
+            try:
+                model_path = 'models/smpl/SMPL_NEUTRAL.pkl'
+                if not os.path.exists(model_path):
+                    logger.error(f"SMPL模型文件不存在: {model_path}")
+                    raise FileNotFoundError(f"SMPL模型文件不存在: {model_path}")
+                    
+                self.model = SMPL(
+                    model_path=model_path,
+                    gender='neutral',
+                    ext='pkl',
+                    use_pca=False,
+                    create_global_orient=True,
+                    create_body_pose=True,
+                    create_betas=True,
+                    create_transl=True
+                ).to(self.device)
+                
+                logger.info("SMPL模型加载成功")
+                
+            except Exception as e:
+                logger.error(f"SMPL模型加载失败: {str(e)}")
+                raise
+            
+            # 创建输出目录
+            os.makedirs("output/visualization", exist_ok=True)
+            os.makedirs("output/opensim", exist_ok=True)
+            
+            # 初始化坐标缓存
+            self.coordinate_cache = {}
+            self.coordinate_threshold = 0.01  # 坐标差异阈值
+            
+            # 初始化线程锁
+            self.cache_lock = threading.Lock()
+            self.file_lock = threading.Lock()
+            
+            # 设置线程数
+            self.num_threads = min(8, os.cpu_count() or 1)  # 最多使用8个线程
+            
+        except Exception as e:
+            logger.error(f"初始化3D重建器失败: {str(e)}")
+            raise
     
     def are_coordinates_similar(self, coords1, coords2):
         """检查两组坐标是否相似"""
