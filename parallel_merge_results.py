@@ -41,7 +41,7 @@ def get_function_args(func):
         logger.warning(f"无法获取函数参数信息: {str(e)}")
         return {'args': [], 'defaults': ()}
 
-class ResultsMerger:
+class ParallelResultMerger:
     def __init__(self, num_threads: Optional[int] = None):
         """初始化结果合并器"""
         try:
@@ -130,7 +130,7 @@ def main():
     """主函数"""
     try:
         # 创建结果合并器实例
-        merger = ResultsMerger()
+        merger = ParallelResultMerger()
         
         # 设置输入和输出目录
         input_dir = Path("./output/reconstruction")
