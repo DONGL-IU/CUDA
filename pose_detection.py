@@ -4,7 +4,7 @@ import numpy as np
 import cv2
 import logging
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List, Dict, Any, Union
 from tqdm import tqdm
 import h5py
 from ultralytics import YOLO
