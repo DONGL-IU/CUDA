@@ -60,8 +60,8 @@ class PoseDetector:
             logger.info(f"视频信息: {frame_count}帧, {fps} FPS, {width}x{height}")
             
             # 初始化结果存储
-            keypoints_data: List[np.ndarray] = []
-            confidence_data: List[np.ndarray] = []
+            keypoints_data = np.zeros((frame_count, 17, 2), dtype=np.float32)
+            confidence_data = np.zeros((frame_count, 17), dtype=np.float32)
             
             # 创建进度条
             pbar = tqdm(total=frame_count, desc="处理帧")
@@ -81,12 +81,18 @@ class PoseDetector:
                     keypoints = results[0].keypoints[0].cpu().numpy()
                     confidence = results[0].keypoints.conf[0].cpu().numpy()
                     
-                    keypoints_data.append(keypoints)
-                    confidence_data.append(confidence)
+                    # 确保数据维度正确
+                    if keypoints.shape == (17, 2):
+                        keypoints_data[frame_idx] = keypoints
+                        confidence_data[frame_idx] = confidence
+                    else:
+                        logger.warning(f"帧 {frame_idx} 的关键点维度不正确: {keypoints.shape}")
+                        keypoints_data[frame_idx] = np.zeros((17, 2))
+                        confidence_data[frame_idx] = np.zeros(17)
                 else:
                     # 如果没有检测到姿态，使用零填充
-                    keypoints_data.append(np.zeros((17, 2)))
-                    confidence_data.append(np.zeros(17))
+                    keypoints_data[frame_idx] = np.zeros((17, 2))
+                    confidence_data[frame_idx] = np.zeros(17)
                 
                 frame_idx += 1
                 pbar.update(1)
@@ -97,10 +103,6 @@ class PoseDetector:
             
             pbar.close()
             cap.release()
-            
-            # 转换为numpy数组
-            keypoints_data = np.array(keypoints_data)
-            confidence_data = np.array(confidence_data)
             
             # 保存结果
             output_path.parent.mkdir(parents=True, exist_ok=True)
