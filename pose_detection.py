@@ -1,11 +1,12 @@
 import os
 import torch
-import cv2
 import numpy as np
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+import cv2
 import logging
+from pathlib import Path
+from typing import Optional, Tuple, List, Dict, Any
 from tqdm import tqdm
+import h5py
 from ultralytics import YOLO
 
 # 配置日志
@@ -18,36 +19,29 @@ logger = logging.getLogger(__name__)
 class PoseDetector:
     def __init__(self, device: Optional[torch.device] = None):
         """初始化姿态检测器"""
-        self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = self.load_yolo_model()
-        self.conf_threshold = 0.5
-        self.iou_threshold = 0.45
-        
-    def load_yolo_model(self) -> YOLO:
-        """加载YOLO模型"""
         try:
-            model_path = Path("models/yolo/yolov8n-pose.pt")
-            if not model_path.exists():
-                logger.info("下载YOLOv8姿态检测模型...")
-                model_path.parent.mkdir(parents=True, exist_ok=True)
-                # 直接下载并保存模型
-                model = YOLO("yolov8n-pose.pt")
-                model.export(format="torchscript")  # 使用torchscript格式
-                logger.info("模型下载完成")
-            else:
-                model = YOLO(str(model_path))
-            return model
+            self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            logger.info(f"使用设备: {self.device}")
+            
+            # 加载YOLO模型
+            logger.info("加载YOLO模型...")
+            self.model = YOLO('yolov8n-pose.pt')
+            self.model.to(self.device)
+            logger.info("YOLO模型加载成功")
+            
         except Exception as e:
-            logger.error(f"加载YOLO模型失败: {str(e)}")
+            logger.error(f"初始化姿态检测器失败: {str(e)}")
             raise
     
-    def detect_video(self, video_path: str, output_path: str) -> None:
+    def detect_video(self, video_path: Union[str, Path], output_path: Union[str, Path]) -> None:
         """处理视频文件并检测姿态"""
         try:
+            video_path = Path(video_path)
+            output_path = Path(output_path)
             logger.info(f"开始处理视频: {video_path}")
             
             # 打开视频文件
-            cap = cv2.VideoCapture(video_path)
+            cap = cv2.VideoCapture(str(video_path))
             if not cap.isOpened():
                 raise ValueError(f"无法打开视频文件: {video_path}")
             
@@ -60,8 +54,8 @@ class PoseDetector:
             logger.info(f"视频信息: {frame_count}帧, {fps} FPS, {width}x{height}")
             
             # 初始化结果存储
-            keypoints_data = []
-            confidence_data = []
+            keypoints_data: List[np.ndarray] = []
+            confidence_data: List[np.ndarray] = []
             
             # 创建进度条
             pbar = tqdm(total=frame_count, desc="处理帧")
@@ -97,7 +91,6 @@ class PoseDetector:
             confidence_data = np.array(confidence_data)
             
             # 保存结果
-            output_path = Path(output_path)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             
             with h5py.File(output_path, 'w') as f:
@@ -105,7 +98,9 @@ class PoseDetector:
                 f.create_dataset('confidence', data=confidence_data)
                 f.attrs['frame_count'] = frame_count
                 f.attrs['fps'] = fps
-                f.attrs['video_name'] = Path(video_path).stem
+                f.attrs['video_name'] = video_path.stem
+                f.attrs['width'] = width
+                f.attrs['height'] = height
             
             logger.info(f"姿态检测完成，结果已保存到: {output_path}")
             
@@ -131,18 +126,24 @@ class PoseDetector:
             return np.zeros((17, 2)), np.zeros(17)
 
 def main():
-    # 创建姿态检测器实例
-    detector = PoseDetector()
-    
-    # 处理视频目录
-    video_dir = Path("./videos")
-    output_dir = Path("./output/detection")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # 处理所有视频文件
-    for video_path in video_dir.glob("*.mp4"):
-        output_path = output_dir / f"{video_path.stem}_pose.h5"
-        detector.detect_video(str(video_path), str(output_path))
+    """主函数"""
+    try:
+        # 创建姿态检测器实例
+        detector = PoseDetector()
+        
+        # 处理视频目录
+        video_dir = Path("./videos")
+        output_dir = Path("./output/detection")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 处理所有视频文件
+        for video_path in video_dir.glob("*.mp4"):
+            output_path = output_dir / f"{video_path.stem}_pose.h5"
+            detector.detect_video(video_path, output_path)
+            
+    except Exception as e:
+        logger.error(f"程序执行失败: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main() 

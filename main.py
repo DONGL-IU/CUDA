@@ -4,10 +4,12 @@ import torch
 import logging
 import argparse
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Union
 import h5py
 from tqdm import tqdm
 import shutil
+from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 
 # 配置日志
 logging.basicConfig(
@@ -15,6 +17,16 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+@dataclass
+class ProcessingConfig:
+    """处理配置数据类"""
+    input_dir: Path
+    output_dir: Path
+    device: torch.device
+    use_drive: bool = True
+    batch_size: int = 1
+    num_workers: int = 4
 
 # 导入各个模块
 try:
@@ -26,7 +38,7 @@ except Exception as e:
     logger.error(f"模块导入失败: {str(e)}")
     raise
 
-def is_colab_environment():
+def is_colab_environment() -> bool:
     """检查是否在Google Colab环境中运行"""
     try:
         import google.colab
@@ -34,7 +46,7 @@ def is_colab_environment():
     except ImportError:
         return False
 
-def download_from_drive(drive_path: str, local_path: str):
+def download_from_drive(drive_path: str, local_path: str) -> bool:
     """从Google Drive下载文件到本地"""
     try:
         from google.colab import files
@@ -70,15 +82,22 @@ def download_from_drive(drive_path: str, local_path: str):
                 
             logger.info(f"找到 {len(video_files)} 个视频文件")
             
-            # 复制每个视频文件
-            for video_file in video_files:
-                try:
+            # 使用线程池并行复制文件
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = []
+                for video_file in video_files:
                     target_file = local_path / video_file.name
-                    logger.info(f"正在复制文件: {video_file} -> {target_file}")
-                    shutil.copy2(video_file, target_file)
-                except Exception as e:
-                    logger.error(f"复制文件 {video_file} 失败: {str(e)}")
-                    continue
+                    futures.append(
+                        executor.submit(shutil.copy2, video_file, target_file)
+                    )
+                
+                # 等待所有复制任务完成
+                for future in futures:
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logger.error(f"文件复制失败: {str(e)}")
+                        continue
                     
             return True
         else:
@@ -89,7 +108,7 @@ def download_from_drive(drive_path: str, local_path: str):
         logger.error(f"从Google Drive下载失败: {str(e)}")
         return False
 
-def check_cuda_availability():
+def check_cuda_availability() -> torch.device:
     """检查CUDA是否可用并返回合适的设备"""
     if not torch.cuda.is_available():
         logger.warning("CUDA不可用，将使用CPU")
@@ -106,14 +125,11 @@ def check_cuda_availability():
         return torch.device('cpu')
 
 class SMPLPipeline:
-    def __init__(self, device: Optional[torch.device] = None):
+    def __init__(self, config: ProcessingConfig):
         """初始化SMPL处理流水线"""
         try:
-            if device is None:
-                self.device = check_cuda_availability()
-            else:
-                self.device = device
-                
+            self.config = config
+            self.device = config.device
             logger.info(f"使用设备: {self.device}")
             
             # 确保CUDA设备已正确初始化
@@ -134,63 +150,82 @@ class SMPLPipeline:
             logger.error(f"初始化SMPL流水线失败: {str(e)}")
             raise
         
-    def process_video(self, video_path: str, output_dir: str) -> None:
+    def process_video(self, video_path: Union[str, Path], output_dir: Union[str, Path]) -> None:
         """处理单个视频文件"""
         try:
-            video_name = Path(video_path).stem
+            video_path = Path(video_path)
+            output_dir = Path(output_dir)
+            video_name = video_path.stem
             logger.info(f"开始处理视频: {video_name}")
             
             # 创建输出目录
-            output_path = Path(output_dir) / video_name
+            output_path = output_dir / video_name
             output_path.mkdir(parents=True, exist_ok=True)
             
             # 1. 姿态检测
             pose_output = output_path / "pose_detection.h5"
-            self.pose_detector.detect_video(video_path, pose_output)
+            self.pose_detector.detect_video(str(video_path), str(pose_output))
             
             # 2. 3D重建
             reconstruction_output = output_path / "reconstruction.h5"
-            self.pose_reconstructor.reconstruct_poses(pose_output, reconstruction_output)
+            self.pose_reconstructor.reconstruct_poses(str(pose_output), str(reconstruction_output))
             
             # 3. 数据合并
             merge_output = output_path / "merged_results.h5"
-            self.result_merger.merge_all_results(reconstruction_output, merge_output)
+            self.result_merger.merge_all_results(str(reconstruction_output), str(merge_output))
             
             logger.info(f"视频处理完成: {video_name}")
+            
+            # 清理GPU内存
+            if self.device.type == 'cuda':
+                torch.cuda.empty_cache()
             
         except Exception as e:
             logger.error(f"处理视频失败: {str(e)}")
             raise
             
-    def process_directory(self, input_dir: Path, output_dir: Path):
+    def process_directory(self) -> None:
         """处理整个目录的视频文件"""
         try:
             # 获取所有视频文件
-            video_files = list(input_dir.glob("*.mp4"))
+            video_files = list(self.config.input_dir.glob("*.mp4"))
             if not video_files:
-                logger.warning(f"在目录 {input_dir} 中没有找到视频文件")
+                logger.warning(f"在目录 {self.config.input_dir} 中没有找到视频文件")
                 return
                 
             logger.info(f"找到 {len(video_files)} 个视频文件")
             
-            # 处理每个视频
-            for video_path in tqdm(video_files, desc="处理视频"):
-                try:
-                    self.process_video(str(video_path), str(output_dir))
-                except Exception as e:
-                    logger.error(f"处理视频 {video_path} 时出错: {str(e)}")
-                    continue
+            # 使用线程池并行处理视频
+            with ThreadPoolExecutor(max_workers=self.config.num_workers) as executor:
+                futures = []
+                for video_path in video_files:
+                    future = executor.submit(
+                        self.process_video,
+                        video_path,
+                        self.config.output_dir
+                    )
+                    futures.append(future)
+                
+                # 等待所有处理任务完成
+                for future in tqdm(futures, desc="处理视频"):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logger.error(f"视频处理失败: {str(e)}")
+                        continue
                     
         except Exception as e:
             logger.error(f"处理目录时出错: {str(e)}")
             raise e
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="SMPL处理流水线")
     parser.add_argument("--input", type=str, required=True, help="输入视频文件夹路径")
     parser.add_argument("--output", type=str, required=True, help="输出目录路径")
     parser.add_argument("--device", type=str, default=None, help="指定设备 (cuda/cpu)")
     parser.add_argument("--no-drive", action="store_true", help="不使用Google Drive")
+    parser.add_argument("--batch-size", type=int, default=1, help="批处理大小")
+    parser.add_argument("--num-workers", type=int, default=4, help="并行工作进程数")
     
     args = parser.parse_args()
     
@@ -236,27 +271,21 @@ def main():
         output_path.mkdir(parents=True, exist_ok=True)
         logger.info(f"输出目录已创建: {output_path}")
         
+        # 创建处理配置
+        config = ProcessingConfig(
+            input_dir=input_path,
+            output_dir=output_path,
+            device=device,
+            use_drive=is_colab and not args.no_drive,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers
+        )
+        
         # 初始化流水线
-        pipeline = SMPLPipeline(device=device)
+        pipeline = SMPLPipeline(config)
         
         # 处理输入目录中的所有视频
-        video_files = list(input_path.glob("*.mp4"))
-        if not video_files:
-            logger.warning(f"在目录 {input_path} 中没有找到视频文件")
-            return 1
-            
-        logger.info(f"找到 {len(video_files)} 个视频文件")
-        
-        # 处理每个视频
-        for video_path in tqdm(video_files, desc="处理视频"):
-            try:
-                pipeline.process_video(str(video_path), str(output_path))
-                # 在每个视频处理完后清理GPU内存
-                if device.type == 'cuda':
-                    torch.cuda.empty_cache()
-            except Exception as e:
-                logger.error(f"处理视频 {video_path} 时出错: {str(e)}")
-                continue
+        pipeline.process_directory()
                 
         # 如果是在Colab中运行，将结果上传回Google Drive
         if is_colab and not args.no_drive:
