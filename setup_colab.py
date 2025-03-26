@@ -11,6 +11,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def activate_venv():
+    """激活虚拟环境"""
+    try:
+        venv_python = Path("venv/bin/python")
+        if not venv_python.exists():
+            raise FileNotFoundError("虚拟环境Python解释器未找到")
+            
+        # 将虚拟环境的Python添加到系统路径
+        sys.executable = str(venv_python)
+        sys.prefix = str(venv_python.parent.parent)
+        
+        # 添加虚拟环境的site-packages到Python路径
+        site_packages = venv_python.parent.parent / "lib" / "python3.10" / "site-packages"
+        if site_packages.exists():
+            sys.path.insert(0, str(site_packages))
+            
+        logger.info("虚拟环境激活成功")
+        return True
+    except Exception as e:
+        logger.error(f"激活虚拟环境失败: {str(e)}")
+        return False
+
 def setup_colab_environment():
     """配置Colab环境"""
     try:
@@ -32,19 +54,12 @@ def setup_colab_environment():
         subprocess.run(["python3.10", "-m", "venv", "venv"], check=True)
         
         # 激活虚拟环境
-        logger.info("激活虚拟环境...")
-        # 在Colab中，我们需要修改Python路径来使用虚拟环境
-        venv_python = Path("venv/bin/python")
-        if not venv_python.exists():
-            raise FileNotFoundError("虚拟环境Python解释器未找到")
-            
-        # 将虚拟环境的Python添加到系统路径
-        sys.executable = str(venv_python)
-        sys.prefix = str(venv_python.parent.parent)
+        if not activate_venv():
+            return False
         
         # 升级pip
         logger.info("升级pip...")
-        subprocess.run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
+        subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], check=True)
         
         # 安装依赖包
         logger.info("安装依赖包...")
@@ -62,7 +77,7 @@ def setup_colab_environment():
         ]
         for package in packages:
             logger.info(f"安装 {package}...")
-            subprocess.run([str(venv_python), "-m", "pip", "install", package], check=True)
+            subprocess.run([sys.executable, "-m", "pip", "install", package], check=True)
             
         # 创建必要的目录
         logger.info("创建项目目录...")
@@ -92,4 +107,10 @@ def setup_colab_environment():
         return False
 
 if __name__ == "__main__":
-    setup_colab_environment() 
+    if setup_colab_environment():
+        logger.info("环境配置成功，虚拟环境已激活")
+        # 打印当前Python环境信息
+        logger.info(f"当前Python解释器: {sys.executable}")
+        logger.info(f"Python版本: {sys.version}")
+    else:
+        logger.error("环境配置失败") 
