@@ -6,8 +6,7 @@ from pathlib import Path
 from typing import Optional, List
 import h5py
 from tqdm import tqdm
-from google.colab import drive
-from google.colab import files
+import sys
 
 # 导入各个模块
 from pose_detection import PoseDetector
@@ -21,6 +20,36 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def is_colab_environment():
+    """检查是否在Google Colab环境中运行"""
+    try:
+        import google.colab
+        return True
+    except ImportError:
+        return False
+
+def mount_google_drive():
+    """挂载Google Drive"""
+    if not is_colab_environment():
+        logger.warning("不在Google Colab环境中运行，跳过Google Drive挂载")
+        return False
+        
+    try:
+        from google.colab import drive
+        drive.mount('/content/drive')
+        logger.info("Google Drive已挂载")
+        return True
+    except Exception as e:
+        logger.error(f"Google Drive挂载失败: {str(e)}")
+        return False
+
+def get_base_path():
+    """获取基础路径"""
+    if is_colab_environment():
+        return Path('/content/drive/MyDrive')
+    else:
+        return Path.cwd()
 
 def check_cuda_availability():
     """检查CUDA是否可用并返回合适的设备"""
@@ -37,15 +66,6 @@ def check_cuda_availability():
         logger.error(f"CUDA初始化失败: {str(e)}")
         logger.warning("将使用CPU作为备选")
         return torch.device('cpu')
-
-def mount_google_drive():
-    """挂载Google Drive"""
-    try:
-        drive.mount('/content/drive')
-        logger.info("Google Drive已挂载")
-    except Exception as e:
-        logger.error(f"Google Drive挂载失败: {str(e)}")
-        raise
 
 class SMPLPipeline:
     def __init__(self, device: Optional[torch.device] = None):
@@ -177,16 +197,24 @@ class SMPLPipeline:
 
 def main():
     parser = argparse.ArgumentParser(description="SMPL处理流水线")
-    parser.add_argument("--input", type=str, required=True, help="Google Drive中的输入视频文件夹路径")
-    parser.add_argument("--output", type=str, required=True, help="Google Drive中的输出目录路径")
+    parser.add_argument("--input", type=str, required=True, help="输入视频文件夹路径")
+    parser.add_argument("--output", type=str, required=True, help="输出目录路径")
     parser.add_argument("--device", type=str, default=None, help="指定设备 (cuda/cpu)")
     parser.add_argument("--visualize", action="store_true", help="是否进行可视化")
+    parser.add_argument("--no-drive", action="store_true", help="不使用Google Drive")
     
     args = parser.parse_args()
     
     try:
-        # 挂载Google Drive
-        mount_google_drive()
+        # 检查环境
+        is_colab = is_colab_environment()
+        logger.info(f"运行环境: {'Google Colab' if is_colab else '本地环境'}")
+        
+        # 挂载Google Drive（如果需要）
+        if is_colab and not args.no_drive:
+            if not mount_google_drive():
+                logger.warning("Google Drive挂载失败，将使用本地路径")
+                args.no_drive = True
         
         # 设置设备
         if args.device:
@@ -201,9 +229,16 @@ def main():
         else:
             device = check_cuda_availability()
             
-        # 转换路径为Google Drive路径
-        input_path = Path('/content/drive/MyDrive') / args.input
-        output_path = Path('/content/drive/MyDrive') / args.output
+        # 获取基础路径
+        base_path = get_base_path()
+        
+        # 转换路径
+        if args.no_drive or not is_colab:
+            input_path = Path(args.input)
+            output_path = Path(args.output)
+        else:
+            input_path = base_path / args.input
+            output_path = base_path / args.output
         
         # 创建输出目录
         output_path.mkdir(parents=True, exist_ok=True)
@@ -245,9 +280,12 @@ def main():
     return 0
 
 if __name__ == "__main__":
-    exit(main())
-
-print(f"PyTorch版本: {torch.__version__}")
-print(f"CUDA是否可用: {torch.cuda.is_available()}")
-if torch.cuda.is_available():
-    print(f"CUDA版本: {torch.version.cuda}") 
+    # 打印环境信息
+    print(f"Python版本: {sys.version}")
+    print(f"PyTorch版本: {torch.__version__}")
+    print(f"CUDA是否可用: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"CUDA版本: {torch.version.cuda}")
+    print(f"运行环境: {'Google Colab' if is_colab_environment() else '本地环境'}")
+    
+    exit(main()) 
