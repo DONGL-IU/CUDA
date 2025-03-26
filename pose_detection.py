@@ -26,18 +26,14 @@ class PoseDetector:
             
             # 加载YOLOv8模型
             try:
-                # 设置PyTorch的安全加载配置
-                from ultralytics.nn.tasks import PoseModel
-                torch.serialization.add_safe_globals([PoseModel])
-                
                 # 使用更稳定的配置初始化YOLO模型
                 model_path = 'yolov8n-pose.pt'
                 if not os.path.exists(model_path):
                     logger.info("下载YOLO模型...")
                     self.model = YOLO('yolov8n-pose.pt')
                 else:
-                    # 使用weights_only=False加载模型
-                    self.model = YOLO(model_path, task='pose')
+                    # 使用新的加载方式
+                    self.model = YOLO(model_path)
                 
                 # 设置模型配置
                 self.model.conf = 0.25  # 置信度阈值
