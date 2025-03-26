@@ -58,15 +58,17 @@ class Pose3DReconstructor:
                     logger.error(f"SMPL模型文件不存在: {model_path}")
                     raise FileNotFoundError(f"SMPL模型文件不存在: {model_path}")
                     
-                self.model = SMPL(
+                # 使用更稳定的配置初始化SMPL模型
+                self.model = smplx.create(
                     model_path=model_path,
+                    model_type='smpl',
                     gender='neutral',
-                    ext='pkl',
                     use_pca=False,
                     create_global_orient=True,
                     create_body_pose=True,
                     create_betas=True,
-                    create_transl=True
+                    create_transl=True,
+                    batch_size=1
                 ).to(self.device)
                 
                 logger.info("SMPL模型加载成功")
