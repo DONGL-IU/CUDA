@@ -12,44 +12,53 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def activate_venv():
-    """激活虚拟环境"""
+    """激活虚拟环境（增强版）"""
     try:
-        venv_python = Path("venv/bin/python")
+        venv_dir = Path("venv").absolute()
+        venv_python = venv_dir / "bin" / "python"
+        
         if not venv_python.exists():
-            raise FileNotFoundError("虚拟环境Python解释器未找到")
-            
-        # 将虚拟环境的Python添加到系统路径
-        os.environ["VIRTUAL_ENV"] = str(venv_python.parent.parent)
-        os.environ["PATH"] = f"{venv_python.parent}:{os.environ['PATH']}"
+            raise FileNotFoundError(f"虚拟环境Python未找到: {venv_python}")
+
+        # 彻底清理PATH中的其他Python路径
+        os.environ["PATH"] = f"{venv_dir/'bin'}:{os.environ.get('PATH', '')}"
+        os.environ["PATH"] = ":".join(
+            p for p in os.environ["PATH"].split(":") 
+            if "python" not in p.lower() or str(venv_dir) in p
+        )
         
-        # 完全替换Python环境
+        # 完全替换系统路径
+        os.environ["VIRTUAL_ENV"] = str(venv_dir)
         sys.executable = str(venv_python)
-        sys.prefix = str(venv_python.parent.parent)
-        sys.base_prefix = str(venv_python.parent.parent)
-        sys.base_exec_prefix = str(venv_python.parent.parent)
+        sys.prefix = str(venv_dir)
+        sys.base_prefix = str(venv_dir)
+        sys.base_exec_prefix = str(venv_dir)
         
-        # 添加虚拟环境的site-packages到Python路径
-        site_packages = venv_python.parent.parent / "lib" / "python3.10" / "site-packages"
-        if site_packages.exists():
-            sys.path = [str(site_packages)] + [p for p in sys.path if "python3.11" not in p]
+        # 重载sys.path
+        lib_path = venv_dir / "lib" / "python3.10"
+        sys.path = [
+            str(lib_path / "site-packages"),
+            str(lib_path),
+            *[p for p in sys.path if "python3.11" not in p]
+        ]
+        
+        # 验证版本
+        version = subprocess.run(
+            [str(venv_python), "-c", "import sys; print(sys.version)"],
+            capture_output=True, text=True
+        )
+        if "3.10" not in version.stdout:
+            raise RuntimeError(f"版本验证失败: {version.stdout}")
             
-        # 验证Python版本
-        version_check = subprocess.run([str(venv_python), "--version"], capture_output=True, text=True)
-        if "Python 3.10" not in version_check.stdout:
-            raise RuntimeError(f"虚拟环境Python版本不正确: {version_check.stdout}")
-            
-        # 验证sys.version
-        if "3.10" not in sys.version:
-            raise RuntimeError(f"sys.version不正确: {sys.version}")
-            
-        logger.info(f"虚拟环境激活成功: {version_check.stdout.strip()}")
+        logger.info(f"虚拟环境激活成功\nPython路径: {venv_python}\n版本: {version.stdout}")
         return True
+        
     except Exception as e:
-        logger.error(f"激活虚拟环境失败: {str(e)}")
+        logger.error(f"激活失败: {type(e).__name__}: {str(e)}")
         return False
 
 def setup_colab_environment():
-    """配置Colab环境"""
+    """配置Colab环境（完整修正版）"""
     try:
         # 检查是否在Colab环境中
         try:
@@ -59,24 +68,40 @@ def setup_colab_environment():
             logger.error("未检测到Colab环境，请确保在Google Colab中运行此脚本")
             return False
             
-        # 安装Python 3.10
-        logger.info("正在安装Python 3.10...")
-        subprocess.run(["apt-get", "update"], check=True)
-        subprocess.run(["apt-get", "install", "-y", "python3.10", "python3.10-dev", "python3.10-venv"], check=True)
+        # 1. 安装Python 3.10
+        logger.info("安装Python 3.10...")
+        subprocess.run([
+            "apt-get", "update"
+        ], check=True)
+        subprocess.run([
+            "apt-get", "install", "-y", 
+            "python3.10", 
+            "python3.10-dev", 
+            "python3.10-distutils",
+            "python3.10-venv"
+        ], check=True)
         
-        # 创建虚拟环境
-        logger.info("创建Python 3.10虚拟环境...")
-        subprocess.run(["python3.10", "-m", "venv", "venv"], check=True)
+        # 2. 创建干净的虚拟环境
+        logger.info("创建虚拟环境...")
+        venv_cmd = [
+            "/usr/bin/python3.10",  # 明确指定Python 3.10路径
+            "-m", "venv", 
+            "--clear",  # 清除现有环境
+            "--copies",  # 使用独立副本而非符号链接
+            "--system-site-packages=False",  # 禁止继承系统包
+            "venv"
+        ]
+        subprocess.run(venv_cmd, check=True)
         
-        # 激活虚拟环境
+        # 3. 激活环境
         if not activate_venv():
-            return False
-        
-        # 升级pip
+            raise RuntimeError("虚拟环境激活失败")
+            
+        # 4. 升级pip
         logger.info("升级pip...")
         subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], check=True)
         
-        # 安装依赖包
+        # 5. 安装依赖包
         logger.info("安装依赖包...")
         packages = [
             "torch==2.0.1",
@@ -94,7 +119,7 @@ def setup_colab_environment():
             logger.info(f"安装 {package}...")
             subprocess.run([sys.executable, "-m", "pip", "install", package], check=True)
             
-        # 创建必要的目录
+        # 6. 创建必要的目录
         logger.info("创建项目目录...")
         directories = [
             "models/smpl",
@@ -107,7 +132,7 @@ def setup_colab_environment():
         for directory in directories:
             Path(directory).mkdir(parents=True, exist_ok=True)
             
-        # 下载SMPL模型
+        # 7. 下载SMPL模型
         logger.info("下载SMPL模型...")
         smpl_url = "https://download.is.tue.mpg.de/download.php?domain=smpl&sfile=SMPL_NEUTRAL.pkl"
         smpl_path = Path("models/smpl/SMPL_NEUTRAL.pkl")
@@ -117,8 +142,11 @@ def setup_colab_environment():
         logger.info("环境配置完成！")
         return True
         
+    except subprocess.CalledProcessError as e:
+        logger.error(f"命令执行失败: {e.cmd}\n{e.stderr}")
+        return False
     except Exception as e:
-        logger.error(f"环境配置失败: {str(e)}")
+        logger.error(f"配置失败: {type(e).__name__}: {str(e)}")
         return False
 
 if __name__ == "__main__":
