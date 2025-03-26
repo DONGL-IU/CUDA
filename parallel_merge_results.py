@@ -17,6 +17,7 @@ import platform
 import torch
 from pathlib import Path
 import concurrent.futures
+import inspect
 
 # 配置日志
 logging.basicConfig(
@@ -25,263 +26,187 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def get_function_args(func):
+    """获取函数参数的兼容性包装器"""
+    try:
+        sig = inspect.signature(func)
+        return {
+            'args': list(sig.parameters.keys()),
+            'defaults': tuple(
+                p.default for p in sig.parameters.values()
+                if p.default is not p.empty
+            )
+        }
+    except Exception as e:
+        logger.warning(f"无法获取函数参数信息: {str(e)}")
+        return {'args': [], 'defaults': ()}
+
 class ParallelResultMerger:
-    def __init__(self, output_dir: str, device: Optional[torch.device] = None):
+    def __init__(self, device: Optional[torch.device] = None):
         """初始化并行结果合并器"""
-        if device is None:
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        else:
-            self.device = device
-            
-        logger.info(f"使用设备: {self.device}")
-        
-        # 设置输出目录
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 设置线程数
-        self.max_workers = min(16, os.cpu_count() or 8)
-        logger.info(f"使用 {self.max_workers} 个工作线程")
-        
-        # 设置内存限制
-        self.memory_limit = int(psutil.virtual_memory().total * 0.3)  # 使用30%的系统内存
-        logger.info(f"内存限制: {self.memory_limit / (1024**3):.2f} GB")
-        
-        # 初始化进度条
-        self.merge_pbar = None
-        self.file_pbar = None
-        self.pbar_lock = threading.Lock()
-        
-    def merge_all_results(self):
-        """合并所有结果"""
-        logger.info("开始合并所有结果...")
-        
-        # 创建总体进度条
-        self.merge_pbar = tqdm(total=4, desc="总体进度", position=0)
-        
         try:
-            # 1. 合并基本参数
-            self.merge_basic_params()
-            self.merge_pbar.update(1)
-            
-            # 2. 合并顶点数据
-            self.merge_vertices()
-            self.merge_pbar.update(1)
-            
-            # 3. 合并关节点数据
-            self.merge_joints()
-            self.merge_pbar.update(1)
-            
-            # 4. 合并信息文件
-            self.merge_info()
-            self.merge_pbar.update(1)
-            
-        finally:
-            # 清理进度条
-            if self.merge_pbar:
-                self.merge_pbar.close()
-            if self.file_pbar:
-                self.file_pbar.close()
+            if device is None:
+                self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            else:
+                self.device = device
                 
-        logger.info("合并完成")
-        
-    def merge_basic_params(self):
-        """合并基本参数"""
-        logger.info("开始合并基本参数...")
-        
-        # 查找所有基本参数文件
-        param_files = list(self.output_dir.glob("frame_*_smpl_params.h5"))
-        if not param_files:
-            logger.warning("未找到基本参数文件")
-            return
+            logger.info(f"使用设备: {self.device}")
             
-        # 创建文件处理进度条
-        self.file_pbar = tqdm(total=len(param_files), desc="处理文件", position=1)
-        
-        # 使用线程池处理文件
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = []
-            for file in param_files:
-                future = executor.submit(self.process_file_chunk, file)
-                futures.append(future)
-                
-            # 等待所有任务完成
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    logger.error(f"处理文件时出错: {str(e)}")
-                    
-        # 合并所有结果
-        self.merge_hdf5_files(param_files, self.output_dir / "merged_basic_params.h5")
-        
-    def merge_vertices(self):
-        """合并顶点数据"""
-        logger.info("开始合并顶点数据...")
-        
-        # 查找所有顶点数据文件
-        vertex_files = list(self.output_dir.glob("frame_*_smpl_params_vertices_*.h5"))
-        if not vertex_files:
-            logger.warning("未找到顶点数据文件")
-            return
+            # 设置线程数
+            self.num_threads = min(8, os.cpu_count() or 1)
+            logger.info(f"使用线程数: {self.num_threads}")
             
-        # 创建文件处理进度条
-        self.file_pbar = tqdm(total=len(vertex_files), desc="处理文件", position=1)
-        
-        # 使用线程池处理文件
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = []
-            for file in vertex_files:
-                future = executor.submit(self.process_file_chunk, file)
-                futures.append(future)
-                
-            # 等待所有任务完成
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    logger.error(f"处理文件时出错: {str(e)}")
-                    
-        # 合并所有结果
-        self.merge_hdf5_files(vertex_files, self.output_dir / "merged_vertices.h5")
-        
-    def merge_joints(self):
-        """合并关节点数据"""
-        logger.info("开始合并关节点数据...")
-        
-        # 查找所有关节点数据文件
-        joint_files = list(self.output_dir.glob("frame_*_joints.h5"))
-        if not joint_files:
-            logger.warning("未找到关节点数据文件")
-            return
-            
-        # 创建文件处理进度条
-        self.file_pbar = tqdm(total=len(joint_files), desc="处理文件", position=1)
-        
-        # 使用线程池处理文件
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = []
-            for file in joint_files:
-                future = executor.submit(self.process_file_chunk, file)
-                futures.append(future)
-                
-            # 等待所有任务完成
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    logger.error(f"处理文件时出错: {str(e)}")
-                    
-        # 合并所有结果
-        self.merge_hdf5_files(joint_files, self.output_dir / "merged_joints.h5")
-        
-    def merge_info(self):
-        """合并信息文件"""
-        logger.info("开始合并信息文件...")
-        
-        # 查找信息文件
-        info_file = self.output_dir / "reconstruction_summary.json"
-        if not info_file.exists():
-            logger.warning("未找到信息文件")
-            return
-            
-        # 读取并合并信息
-        with open(info_file, 'r') as f:
-            info_data = json.load(f)
-            
-        # 保存合并后的信息
-        output_file = self.output_dir / "merged_info.json"
-        with open(output_file, 'w') as f:
-            json.dump(info_data, f, indent=4)
-            
-        logger.info(f"信息已保存到: {output_file}")
-        
-    def process_file_chunk(self, file_path: Path):
-        """处理单个文件块"""
-        try:
-            # 更新进度条描述
-            with self.pbar_lock:
-                self.file_pbar.set_description(f"处理: {file_path.name}")
-                
-            # 读取HDF5文件
-            with h5py.File(file_path, 'r') as f:
-                # 获取数据集信息
-                datasets = list(f.keys())
-                
-                # 检查内存使用
-                if psutil.Process().memory_info().rss > self.memory_limit:
-                    logger.warning("内存使用超过限制，等待释放...")
-                    while psutil.Process().memory_info().rss > self.memory_limit:
-                        time.sleep(1)
-                        
-            # 更新进度
-            with self.pbar_lock:
-                self.file_pbar.update(1)
-                
         except Exception as e:
-            logger.error(f"处理文件 {file_path} 时出错: {str(e)}")
-            raise e
+            logger.error(f"初始化并行结果合并器失败: {str(e)}")
+            raise
+    
+    def merge_all_results(self, input_file: str, output_file: str) -> None:
+        """合并所有处理结果"""
+        try:
+            logger.info(f"开始合并结果: {input_file}")
             
-    def merge_hdf5_files(self, input_files: List[Path], output_file: Path):
-        """合并多个HDF5文件"""
-        logger.info(f"开始合并 {len(input_files)} 个文件到 {output_file}")
-        
-        # 创建输出文件
-        with h5py.File(output_file, 'w') as out_f:
-            # 获取第一个文件的结构
-            with h5py.File(input_files[0], 'r') as f:
-                for key in f.keys():
-                    if isinstance(f[key], h5py.Dataset):
-                        # 创建数据集
-                        shape = list(f[key].shape)
-                        shape[0] = sum(h5py.File(fname, 'r')[key].shape[0] for fname in input_files)
-                        out_f.create_dataset(key, shape=shape, dtype=f[key].dtype)
-                        
-                        # 复制属性
-                        for attr_name, attr_value in f[key].attrs.items():
-                            out_f[key].attrs[attr_name] = attr_value
-                            
-            # 合并数据
-            offset = 0
-            for input_file in input_files:
-                with h5py.File(input_file, 'r') as f:
-                    for key in f.keys():
-                        if isinstance(f[key], h5py.Dataset):
-                            # 获取数据
-                            data = f[key][:]
-                            
-                            # 写入数据
-                            out_f[key][offset:offset + len(data)] = data
-                            
-                offset += len(data)
+            # 读取输入数据
+            with h5py.File(input_file, 'r') as f:
+                vertices = f['vertices'][:]
+                joints = f['joints'][:]
+                parameters = {
+                    'global_orient': f['parameters/global_orient'][:],
+                    'body_pose': f['parameters/body_pose'][:],
+                    'betas': f['parameters/betas'][:],
+                    'transl': f['parameters/transl'][:]
+                }
+                metadata = dict(f.attrs)
+            
+            # 创建输出目录
+            output_path = Path(output_file)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 创建进度条
+            pbar = tqdm(total=4, desc="合并结果")
+            
+            # 1. 合并顶点数据
+            pbar.set_description("合并顶点数据")
+            merged_vertices = self.merge_vertices(vertices)
+            pbar.update(1)
+            
+            # 2. 合并关节点数据
+            pbar.set_description("合并关节点数据")
+            merged_joints = self.merge_joints(joints)
+            pbar.update(1)
+            
+            # 3. 合并SMPL参数
+            pbar.set_description("合并SMPL参数")
+            merged_parameters = self.merge_parameters(parameters)
+            pbar.update(1)
+            
+            # 4. 保存合并结果
+            pbar.set_description("保存合并结果")
+            self.save_merged_results(
+                output_path,
+                merged_vertices,
+                merged_joints,
+                merged_parameters,
+                metadata
+            )
+            pbar.update(1)
+            
+            pbar.close()
+            logger.info(f"结果合并完成: {output_path}")
+            
+        except Exception as e:
+            logger.error(f"合并结果失败: {str(e)}")
+            raise
+    
+    def merge_vertices(self, vertices: np.ndarray) -> np.ndarray:
+        """合并顶点数据"""
+        try:
+            # 确保顶点数据是3D的
+            if vertices.ndim == 2:
+                vertices = vertices.reshape(-1, vertices.shape[1] // 3, 3)
+            
+            # 合并所有帧的顶点
+            merged_vertices = np.concatenate(vertices, axis=0)
+            return merged_vertices
+            
+        except Exception as e:
+            logger.error(f"合并顶点数据失败: {str(e)}")
+            raise
+    
+    def merge_joints(self, joints: np.ndarray) -> np.ndarray:
+        """合并关节点数据"""
+        try:
+            # 确保关节点数据是3D的
+            if joints.ndim == 2:
+                joints = joints.reshape(-1, joints.shape[1] // 3, 3)
+            
+            # 合并所有帧的关节点
+            merged_joints = np.concatenate(joints, axis=0)
+            return merged_joints
+            
+        except Exception as e:
+            logger.error(f"合并关节点数据失败: {str(e)}")
+            raise
+    
+    def merge_parameters(self, parameters: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+        """合并SMPL参数"""
+        try:
+            merged_params = {}
+            for key, value in parameters.items():
+                # 确保参数是3D的
+                if value.ndim == 2:
+                    value = value.reshape(-1, value.shape[1] // 3, 3)
+                merged_params[key] = np.concatenate(value, axis=0)
+            return merged_params
+            
+        except Exception as e:
+            logger.error(f"合并SMPL参数失败: {str(e)}")
+            raise
+    
+    def save_merged_results(
+        self,
+        output_path: Path,
+        vertices: np.ndarray,
+        joints: np.ndarray,
+        parameters: Dict[str, np.ndarray],
+        metadata: Dict
+    ) -> None:
+        """保存合并后的结果"""
+        try:
+            with h5py.File(output_path, 'w') as f:
+                # 保存顶点数据
+                f.create_dataset('vertices', data=vertices)
                 
-        logger.info(f"合并完成: {output_file}")
-        
-    def log_memory_usage(self):
-        """记录内存使用情况"""
-        process = psutil.Process()
-        memory_info = process.memory_info()
-        logger.info(f"内存使用: {memory_info.rss / (1024**3):.2f} GB")
+                # 保存关节点数据
+                f.create_dataset('joints', data=joints)
+                
+                # 保存SMPL参数
+                params_group = f.create_group('parameters')
+                for key, value in parameters.items():
+                    params_group.create_dataset(key, data=value)
+                
+                # 保存元数据
+                for key, value in metadata.items():
+                    f.attrs[key] = value
+                    
+            logger.info(f"合并结果已保存到: {output_path}")
+            
+        except Exception as e:
+            logger.error(f"保存合并结果失败: {str(e)}")
+            raise
 
 def main():
-    """主函数"""
-    # 设置输出目录
-    reconstruction_dir = "./output/reconstruction"
+    # 创建并行结果合并器实例
+    merger = ParallelResultMerger()
     
-    # 检查目录是否存在
-    if not os.path.exists(reconstruction_dir):
-        print(f"错误: 目录 {reconstruction_dir} 不存在")
-        return
+    # 处理重建结果
+    reconstruction_dir = Path("./output/reconstruction")
+    output_dir = Path("./output/merged")
+    output_dir.mkdir(parents=True, exist_ok=True)
     
-    # 创建并行合并器实例（自动检测最优线程数）
-    merger = ParallelResultMerger(reconstruction_dir)
-    
-    try:
-        # 合并所有结果
-        merger.merge_all_results()
-    except Exception as e:
-        logger.error(f"合并过程中发生错误: {str(e)}")
-        return
+    # 处理所有重建结果文件
+    for result_file in reconstruction_dir.glob("*.h5"):
+        output_file = output_dir / f"merged_{result_file.name}"
+        merger.merge_all_results(str(result_file), str(output_file))
 
 if __name__ == "__main__":
     main() 
