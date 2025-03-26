@@ -148,7 +148,7 @@ def main():
         logger.info(f"当前工作目录: {current_dir}")
         
         # 处理视频目录
-        video_dir = current_dir / "videos"  # 使用相对路径
+        video_dir = Path("/content/CUDA/videos")  # 使用正确的视频目录路径
         output_dir = current_dir / "output" / "detection"
         
         logger.info(f"视频目录: {video_dir}")
