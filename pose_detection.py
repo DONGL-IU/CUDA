@@ -30,8 +30,9 @@ class PoseDetector:
             if not model_path.exists():
                 logger.info("下载YOLOv8姿态检测模型...")
                 model_path.parent.mkdir(parents=True, exist_ok=True)
+                # 直接下载并保存模型
                 model = YOLO("yolov8n-pose.pt")
-                model.export(format="pt")
+                model.export(format="torchscript")  # 使用torchscript格式
                 logger.info("模型下载完成")
             else:
                 model = YOLO(str(model_path))
