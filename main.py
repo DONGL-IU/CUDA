@@ -37,23 +37,48 @@ def download_from_drive(drive_path: str, local_path: str):
         from google.colab import drive
         
         # 挂载Google Drive
+        logger.info("正在挂载Google Drive...")
         drive.mount('/content/drive')
+        logger.info("Google Drive挂载成功")
         
+        # 构建完整的Drive路径
+        full_drive_path = Path('/content/drive/MyDrive') / drive_path
+        logger.info(f"尝试访问Drive路径: {full_drive_path}")
+        
+        # 检查路径是否存在
+        if not full_drive_path.exists():
+            logger.error(f"Drive路径不存在: {full_drive_path}")
+            return False
+            
         # 确保目标目录存在
-        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        local_path = Path(local_path)
+        logger.info(f"创建本地目录: {local_path}")
+        local_path.mkdir(parents=True, exist_ok=True)
         
-        # 复制文件
-        drive_path = Path('/content/drive/MyDrive') / drive_path
-        if drive_path.is_file():
-            shutil.copy2(drive_path, local_path)
-            logger.info(f"成功下载文件: {drive_path} -> {local_path}")
-            return True
-        elif drive_path.is_dir():
-            shutil.copytree(drive_path, local_path, dirs_exist_ok=True)
-            logger.info(f"成功下载目录: {drive_path} -> {local_path}")
+        # 如果是目录，复制所有文件
+        if full_drive_path.is_dir():
+            logger.info(f"正在复制目录: {full_drive_path} -> {local_path}")
+            # 获取所有视频文件
+            video_files = list(full_drive_path.glob("*.mp4"))
+            if not video_files:
+                logger.warning(f"在目录 {full_drive_path} 中没有找到视频文件")
+                return False
+                
+            logger.info(f"找到 {len(video_files)} 个视频文件")
+            
+            # 复制每个视频文件
+            for video_file in video_files:
+                try:
+                    target_file = local_path / video_file.name
+                    logger.info(f"正在复制文件: {video_file} -> {target_file}")
+                    shutil.copy2(video_file, target_file)
+                except Exception as e:
+                    logger.error(f"复制文件 {video_file} 失败: {str(e)}")
+                    continue
+                    
             return True
         else:
-            logger.error(f"文件或目录不存在: {drive_path}")
+            logger.error(f"指定的路径不是目录: {full_drive_path}")
             return False
             
     except Exception as e:
@@ -236,8 +261,10 @@ def main():
         if is_colab and not args.no_drive:
             # 在Colab中，将文件下载到本地
             local_input = "/content/input_videos"
+            logger.info(f"准备从Google Drive下载文件: {args.input} -> {local_input}")
             if download_from_drive(args.input, local_input):
                 input_path = Path(local_input)
+                logger.info(f"成功设置输入路径: {input_path}")
             else:
                 logger.error("无法从Google Drive下载输入文件")
                 return 1
@@ -252,6 +279,7 @@ def main():
         
         # 创建输出目录
         output_path.mkdir(parents=True, exist_ok=True)
+        logger.info(f"输出目录已创建: {output_path}")
         
         # 初始化流水线
         pipeline = SMPLPipeline(device=device)
@@ -287,7 +315,9 @@ def main():
         if is_colab and not args.no_drive:
             try:
                 from google.colab import files
+                logger.info("准备上传结果到Google Drive...")
                 files.download(str(output_path))
+                logger.info("结果上传成功")
             except Exception as e:
                 logger.error(f"上传结果到Google Drive失败: {str(e)}")
                 
