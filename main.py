@@ -13,6 +13,12 @@ if sys.version_info >= (3, 11):
         torch._six.PY3 = True
         torch._six.PY37 = False
 
+# 解决NumPy兼容性问题
+if sys.version_info >= (3, 11):
+    import numpy as np
+    if not hasattr(np, 'bool'):
+        np.bool = bool
+
 import os
 import torch
 import logging

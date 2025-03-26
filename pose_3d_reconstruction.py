@@ -13,6 +13,12 @@ if sys.version_info >= (3, 11):
         torch._six.PY3 = True
         torch._six.PY37 = False
 
+# 解决NumPy兼容性问题
+if sys.version_info >= (3, 11):
+    import numpy as np
+    if not hasattr(np, 'bool'):
+        np.bool = bool
+
 import os
 import cv2
 import torch
@@ -104,17 +110,38 @@ class Pose3DReconstructor:
             if sys.version_info >= (3, 11):
                 logger.info("检测到Python 3.11+，使用兼容性配置加载SMPL模型")
                 # 使用更稳定的配置初始化SMPL模型
-                self.model = smplx.create(
-                    model_path=model_path,
-                    model_type='smpl',
-                    gender='neutral',
-                    use_pca=False,
-                    batch_size=1,
-                    create_global_orient=True,
-                    create_body_pose=True,
-                    create_betas=True,
-                    create_transl=True
-                ).to(self.device)
+                try:
+                    self.model = smplx.create(
+                        model_path=model_path,
+                        model_type='smpl',
+                        gender='neutral',
+                        use_pca=False,
+                        batch_size=1,
+                        create_global_orient=True,
+                        create_body_pose=True,
+                        create_betas=True,
+                        create_transl=True
+                    ).to(self.device)
+                except Exception as e:
+                    if 'bool' in str(e):
+                        logger.info("应用NumPy兼容性补丁")
+                        # 临时修改numpy的bool类型
+                        import numpy as np
+                        np.bool = bool
+                        # 重新尝试加载
+                        self.model = smplx.create(
+                            model_path=model_path,
+                            model_type='smpl',
+                            gender='neutral',
+                            use_pca=False,
+                            batch_size=1,
+                            create_global_orient=True,
+                            create_body_pose=True,
+                            create_betas=True,
+                            create_transl=True
+                        ).to(self.device)
+                    else:
+                        raise
             else:
                 # 标准配置加载
                 self.model = smplx.create(
