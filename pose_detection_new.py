@@ -81,10 +81,14 @@ class PoseDetector:
                     keypoints = results[0].keypoints[0].cpu().numpy()  # (17, 2)
                     confidence = results[0].keypoints.conf[0].cpu().numpy()
                     
-                    # 确保数据维度正确
+                    # 将关键点展平为一维数组
                     if keypoints.shape == (17, 2):
+<<<<<<< HEAD
                         # 将关键点展平为一维数组
                         keypoints_flat = keypoints.flatten()  # (34,)
+=======
+                        keypoints_flat = keypoints.flatten()  # 将(17,2)展平为(34,)
+>>>>>>> origin/main
                         keypoints_data[frame_idx] = keypoints_flat
                         confidence_data[frame_idx] = confidence
                     else:
