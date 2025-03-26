@@ -7,6 +7,7 @@ from typing import Optional, List
 import h5py
 from tqdm import tqdm
 import sys
+import shutil
 
 # 导入各个模块
 from pose_detection import PoseDetector
@@ -29,27 +30,35 @@ def is_colab_environment():
     except ImportError:
         return False
 
-def mount_google_drive():
-    """挂载Google Drive"""
-    if not is_colab_environment():
-        logger.warning("不在Google Colab环境中运行，跳过Google Drive挂载")
-        return False
-        
+def download_from_drive(drive_path: str, local_path: str):
+    """从Google Drive下载文件到本地"""
     try:
+        from google.colab import files
         from google.colab import drive
+        
+        # 挂载Google Drive
         drive.mount('/content/drive')
-        logger.info("Google Drive已挂载")
-        return True
+        
+        # 确保目标目录存在
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        
+        # 复制文件
+        drive_path = Path('/content/drive/MyDrive') / drive_path
+        if drive_path.is_file():
+            shutil.copy2(drive_path, local_path)
+            logger.info(f"成功下载文件: {drive_path} -> {local_path}")
+            return True
+        elif drive_path.is_dir():
+            shutil.copytree(drive_path, local_path, dirs_exist_ok=True)
+            logger.info(f"成功下载目录: {drive_path} -> {local_path}")
+            return True
+        else:
+            logger.error(f"文件或目录不存在: {drive_path}")
+            return False
+            
     except Exception as e:
-        logger.error(f"Google Drive挂载失败: {str(e)}")
+        logger.error(f"从Google Drive下载失败: {str(e)}")
         return False
-
-def get_base_path():
-    """获取基础路径"""
-    if is_colab_environment():
-        return Path('/content/drive/MyDrive')
-    else:
-        return Path.cwd()
 
 def check_cuda_availability():
     """检查CUDA是否可用并返回合适的设备"""
@@ -210,12 +219,6 @@ def main():
         is_colab = is_colab_environment()
         logger.info(f"运行环境: {'Google Colab' if is_colab else '本地环境'}")
         
-        # 挂载Google Drive（如果需要）
-        if is_colab and not args.no_drive:
-            if not mount_google_drive():
-                logger.warning("Google Drive挂载失败，将使用本地路径")
-                args.no_drive = True
-        
         # 设置设备
         if args.device:
             try:
@@ -229,16 +232,23 @@ def main():
         else:
             device = check_cuda_availability()
             
-        # 获取基础路径
-        base_path = get_base_path()
-        
-        # 转换路径
-        if args.no_drive or not is_colab:
-            input_path = Path(args.input)
-            output_path = Path(args.output)
+        # 处理输入路径
+        if is_colab and not args.no_drive:
+            # 在Colab中，将文件下载到本地
+            local_input = "/content/input_videos"
+            if download_from_drive(args.input, local_input):
+                input_path = Path(local_input)
+            else:
+                logger.error("无法从Google Drive下载输入文件")
+                return 1
         else:
-            input_path = base_path / args.input
-            output_path = base_path / args.output
+            input_path = Path(args.input)
+            
+        # 设置输出路径
+        if is_colab and not args.no_drive:
+            output_path = Path("/content/output_results")
+        else:
+            output_path = Path(args.output)
         
         # 创建输出目录
         output_path.mkdir(parents=True, exist_ok=True)
@@ -272,6 +282,14 @@ def main():
                 pipeline.visualize_results(str(merged_data_path), output_path)
             else:
                 logger.warning("未找到合并后的数据文件，跳过可视化")
+                
+        # 如果是在Colab中运行，将结果上传回Google Drive
+        if is_colab and not args.no_drive:
+            try:
+                from google.colab import files
+                files.download(str(output_path))
+            except Exception as e:
+                logger.error(f"上传结果到Google Drive失败: {str(e)}")
                 
     except Exception as e:
         logger.error(f"程序执行出错: {str(e)}")
