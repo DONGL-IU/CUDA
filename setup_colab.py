@@ -21,18 +21,26 @@ def activate_venv():
         # 将虚拟环境的Python添加到系统路径
         os.environ["VIRTUAL_ENV"] = str(venv_python.parent.parent)
         os.environ["PATH"] = f"{venv_python.parent}:{os.environ['PATH']}"
+        
+        # 完全替换Python环境
         sys.executable = str(venv_python)
         sys.prefix = str(venv_python.parent.parent)
+        sys.base_prefix = str(venv_python.parent.parent)
+        sys.base_exec_prefix = str(venv_python.parent.parent)
         
         # 添加虚拟环境的site-packages到Python路径
         site_packages = venv_python.parent.parent / "lib" / "python3.10" / "site-packages"
         if site_packages.exists():
-            sys.path.insert(0, str(site_packages))
+            sys.path = [str(site_packages)] + [p for p in sys.path if "python3.11" not in p]
             
         # 验证Python版本
         version_check = subprocess.run([str(venv_python), "--version"], capture_output=True, text=True)
         if "Python 3.10" not in version_check.stdout:
             raise RuntimeError(f"虚拟环境Python版本不正确: {version_check.stdout}")
+            
+        # 验证sys.version
+        if "3.10" not in sys.version:
+            raise RuntimeError(f"sys.version不正确: {sys.version}")
             
         logger.info(f"虚拟环境激活成功: {version_check.stdout.strip()}")
         return True
@@ -123,5 +131,10 @@ if __name__ == "__main__":
         # 验证Python版本
         version_check = subprocess.run([sys.executable, "--version"], capture_output=True, text=True)
         logger.info(f"Python版本验证: {version_check.stdout.strip()}")
+        
+        # 验证sys.path
+        logger.info("Python路径:")
+        for path in sys.path:
+            logger.info(f"  {path}")
     else:
         logger.error("环境配置失败") 
