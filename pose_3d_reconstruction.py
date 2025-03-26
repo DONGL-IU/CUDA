@@ -1,47 +1,14 @@
-# 兼容性补丁（必须在所有其他导入之前）
-import sys
-import inspect
-
-# 解决Python 3.11+中inspect.getargspec移除的问题
-if not hasattr(inspect, 'getargspec'):
-    inspect.getargspec = inspect.getfullargspec
-
-# 解决torch._six兼容性问题
-if sys.version_info >= (3, 11):
-    import torch
-    if hasattr(torch, '_six'):
-        torch._six.PY3 = True
-        torch._six.PY37 = False
-
-# 解决NumPy兼容性问题
-if sys.version_info >= (3, 11):
-    import numpy as np
-    if not hasattr(np, 'bool'):
-        np.bool = bool
-
+# 移除兼容性补丁
 import os
-import cv2
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
-from smplx import SMPL
-import torch.nn.functional as F
-import json
-from scipy.spatial.transform import Rotation
-import threading
-from queue import Queue
-import concurrent.futures
-from tqdm import tqdm
 import h5py
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import logging
+from tqdm import tqdm
 import smplx
-
-# 设置中文字体
-plt.rcParams['font.sans-serif'] = ['SimHei']
-plt.rcParams['axes.unicode_minus'] = False
 
 # 配置日志
 logging.basicConfig(
@@ -50,129 +17,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def get_function_args(func):
-    """获取函数参数的兼容性包装器"""
-    try:
-        sig = inspect.signature(func)
-        return {
-            'args': list(sig.parameters.keys()),
-            'defaults': tuple(
-                p.default for p in sig.parameters.values()
-                if p.default is not p.empty
-            )
-        }
-    except Exception as e:
-        logger.warning(f"无法获取函数参数信息: {str(e)}")
-        return {'args': [], 'defaults': ()}
-
 class Pose3DReconstructor:
     def __init__(self, device: Optional[torch.device] = None):
         """初始化3D重建器"""
-        try:
-            if device is None:
-                self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            else:
-                self.device = device
-                
-            logger.info(f"使用设备: {self.device}")
-            
-            # 加载SMPL模型
-            self.load_smpl_model()
-            
-            # 创建输出目录
-            os.makedirs("output/visualization", exist_ok=True)
-            os.makedirs("output/opensim", exist_ok=True)
-            
-            # 初始化坐标缓存
-            self.coordinate_cache = {}
-            self.coordinate_threshold = 0.01  # 坐标差异阈值
-            
-            # 初始化线程锁
-            self.cache_lock = threading.Lock()
-            self.file_lock = threading.Lock()
-            
-            # 设置线程数
-            self.num_threads = min(8, os.cpu_count() or 1)  # 最多使用8个线程
-            
-        except Exception as e:
-            logger.error(f"初始化3D重建器失败: {str(e)}")
-            raise
-    
-    def load_smpl_model(self):
+        self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.smpl_model = self.load_smpl_model()
+        
+    def load_smpl_model(self) -> smplx.SMPL:
         """加载SMPL模型"""
         try:
-            model_path = 'models/smpl/SMPL_NEUTRAL.pkl'
-            if not os.path.exists(model_path):
+            model_path = Path("models/smpl/SMPL_NEUTRAL.pkl")
+            if not model_path.exists():
                 logger.error(f"SMPL模型文件不存在: {model_path}")
                 raise FileNotFoundError(f"SMPL模型文件不存在: {model_path}")
-            
-            # 检查Python版本兼容性
-            if sys.version_info >= (3, 11):
-                logger.info("检测到Python 3.11+，使用兼容性配置加载SMPL模型")
-                # 使用更稳定的配置初始化SMPL模型
-                try:
-                    self.model = smplx.create(
-                        model_path=model_path,
-                        model_type='smpl',
-                        gender='neutral',
-                        use_pca=False,
-                        batch_size=1,
-                        create_global_orient=True,
-                        create_body_pose=True,
-                        create_betas=True,
-                        create_transl=True
-                    ).to(self.device)
-                except Exception as e:
-                    if 'bool' in str(e):
-                        logger.info("应用NumPy兼容性补丁")
-                        # 临时修改numpy的bool类型
-                        import numpy as np
-                        np.bool = bool
-                        # 重新尝试加载
-                        self.model = smplx.create(
-                            model_path=model_path,
-                            model_type='smpl',
-                            gender='neutral',
-                            use_pca=False,
-                            batch_size=1,
-                            create_global_orient=True,
-                            create_body_pose=True,
-                            create_betas=True,
-                            create_transl=True
-                        ).to(self.device)
-                    else:
-                        raise
-            else:
-                # 标准配置加载
-                self.model = smplx.create(
-                    model_path=model_path,
-                    model_type='smpl',
-                    gender='neutral',
-                    use_pca=False,
-                    batch_size=1
-                ).to(self.device)
-            
+                
+            logger.info(f"正在加载SMPL模型: {model_path}")
+            model = smplx.create(str(model_path), model_type='smpl', gender='neutral', use_pca=False, create_global_orient=True,
+                               create_body_pose=True, create_transl=True)
+            model.to(self.device)
             logger.info("SMPL模型加载成功")
-            
+            return model
         except Exception as e:
-            logger.error(f"SMPL模型加载失败: {str(e)}")
-            if 'getargspec' in str(e):
-                logger.error("检测到Python 3.11+兼容性问题，尝试应用补丁...")
-                # 应用兼容性补丁
-                if not hasattr(inspect, 'getargspec'):
-                    inspect.getargspec = inspect.getfullargspec
-                # 重新尝试加载
-                self.model = smplx.create(
-                    model_path=model_path,
-                    model_type='smpl',
-                    gender='neutral',
-                    use_pca=False,
-                    batch_size=1
-                ).to(self.device)
-                logger.info("通过兼容性补丁成功加载SMPL模型")
-            else:
-                raise
-    
+            logger.error(f"加载SMPL模型失败: {str(e)}")
+            raise
+
     def are_coordinates_similar(self, coords1, coords2):
         """检查两组坐标是否相似"""
         if len(coords1) != len(coords2):
@@ -468,7 +336,7 @@ class Pose3DReconstructor:
             global_orient = global_orient.to(self.device)
             body_pose = body_pose.to(self.device)
             
-            smpl_output = self.model(
+            smpl_output = self.smpl_model(
                 betas=betas,
                 expression=expression,
                 body_pose=body_pose,
@@ -498,7 +366,7 @@ class Pose3DReconstructor:
             optimizer.step()
             
             # 重新计算SMPL输出
-            smpl_output = self.model(
+            smpl_output = self.smpl_model(
                 betas=betas,
                 expression=expression,
                 body_pose=body_pose,
@@ -589,7 +457,7 @@ class Pose3DReconstructor:
         """保存可视化结果"""
         # 获取SMPL网格
         vertices = smpl_output.vertices[0].detach().cpu().numpy()
-        faces = self.model.faces
+        faces = self.smpl_model.faces
         
         # 创建简单的2D投影可视化
         plt.figure(figsize=(12, 8))
@@ -724,7 +592,7 @@ class Pose3DReconstructor:
                                             device=self.device)
                 
                 # 使用SMPL模型重建
-                smpl_output = self.model(
+                smpl_output = self.smpl_model(
                     global_orient=torch.zeros(1, 3, device=self.device),
                     body_pose=torch.zeros(1, 69, device=self.device),
                     betas=torch.zeros(1, 10, device=self.device),

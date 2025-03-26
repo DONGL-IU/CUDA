@@ -1,24 +1,3 @@
-# 兼容性补丁（必须在所有其他导入之前）
-import sys
-import inspect
-
-# 解决Python 3.11+中inspect.getargspec移除的问题
-if not hasattr(inspect, 'getargspec'):
-    inspect.getargspec = inspect.getfullargspec
-
-# 解决torch._six兼容性问题
-if sys.version_info >= (3, 11):
-    import torch
-    if hasattr(torch, '_six'):
-        torch._six.PY3 = True
-        torch._six.PY37 = False
-
-# 解决NumPy兼容性问题
-if sys.version_info >= (3, 11):
-    import numpy as np
-    if not hasattr(np, 'bool'):
-        np.bool = bool
-
 import os
 import torch
 import logging
@@ -45,37 +24,6 @@ try:
 except Exception as e:
     logger.error(f"模块导入失败: {str(e)}")
     raise
-
-def setup_compatibility():
-    """设置全局兼容性处理"""
-    try:
-        # 检查Python版本
-        if sys.version_info >= (3, 11):
-            logger.info("检测到Python 3.11+，应用兼容性补丁")
-            # 为inspect模块添加getargspec兼容性
-            if not hasattr(inspect, 'getargspec'):
-                inspect.getargspec = inspect.getfullargspec
-                logger.info("已添加inspect.getargspec兼容性")
-    except Exception as e:
-        logger.warning(f"兼容性设置失败: {str(e)}")
-
-# 设置兼容性
-setup_compatibility()
-
-def get_function_args(func):
-    """获取函数参数的兼容性包装器"""
-    try:
-        sig = inspect.signature(func)
-        return {
-            'args': list(sig.parameters.keys()),
-            'defaults': tuple(
-                p.default for p in sig.parameters.values()
-                if p.default is not p.empty
-            )
-        }
-    except Exception as e:
-        logger.warning(f"无法获取函数参数信息: {str(e)}")
-        return {'args': [], 'defaults': ()}
 
 def is_colab_environment():
     """检查是否在Google Colab环境中运行"""
@@ -171,10 +119,6 @@ class SMPLPipeline:
             if self.device.type == 'cuda':
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
-            
-            # 检查Python版本
-            python_version = sys.version_info
-            logger.info(f"Python版本: {python_version.major}.{python_version.minor}.{python_version.micro}")
             
             # 初始化各个模块
             try:

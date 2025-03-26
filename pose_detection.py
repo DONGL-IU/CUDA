@@ -1,30 +1,12 @@
-# 兼容性补丁（必须在所有其他导入之前）
-import sys
-import inspect
-
-# 解决Python 3.11+中inspect.getargspec移除的问题
-if not hasattr(inspect, 'getargspec'):
-    inspect.getargspec = inspect.getfullargspec
-
-# 解决torch._six兼容性问题
-if sys.version_info >= (3, 11):
-    import torch
-    if hasattr(torch, '_six'):
-        torch._six.PY3 = True
-        torch._six.PY37 = False
-
 import os
-import cv2
 import torch
+import cv2
 import numpy as np
-import pandas as pd
-import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import logging
-from ultralytics import YOLO
-import h5py
 from tqdm import tqdm
+from ultralytics import YOLO
 
 # 配置日志
 logging.basicConfig(
@@ -33,84 +15,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def get_function_args(func):
-    """获取函数参数的兼容性包装器"""
-    try:
-        sig = inspect.signature(func)
-        return {
-            'args': list(sig.parameters.keys()),
-            'defaults': tuple(
-                p.default for p in sig.parameters.values()
-                if p.default is not p.empty
-            )
-        }
-    except Exception as e:
-        logger.warning(f"无法获取函数参数信息: {str(e)}")
-        return {'args': [], 'defaults': ()}
-
 class PoseDetector:
     def __init__(self, device: Optional[torch.device] = None):
         """初始化姿态检测器"""
-        try:
-            if device is None:
-                self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            else:
-                self.device = device
-                
-            logger.info(f"使用设备: {self.device}")
-            
-            # 加载YOLO模型
-            self.load_yolo_model()
-            
-            # 定义关键点映射
-            self.keypoint_mapping = {
-                0: 'nose', 1: 'left_eye', 2: 'right_eye', 3: 'left_ear', 4: 'right_ear',
-                5: 'left_shoulder', 6: 'right_shoulder', 7: 'left_elbow', 8: 'right_elbow',
-                9: 'left_wrist', 10: 'right_wrist', 11: 'left_hip', 12: 'right_hip',
-                13: 'left_knee', 14: 'right_knee', 15: 'left_ankle', 16: 'right_ankle'
-            }
-            
-        except Exception as e:
-            logger.error(f"初始化姿态检测器失败: {str(e)}")
-            raise
-    
-    def load_yolo_model(self):
+        self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model = self.load_yolo_model()
+        self.conf_threshold = 0.5
+        self.iou_threshold = 0.45
+        
+    def load_yolo_model(self) -> YOLO:
         """加载YOLO模型"""
         try:
-            model_path = 'yolov8n-pose.pt'
-            if not os.path.exists(model_path):
-                logger.info(f"下载YOLO模型: {model_path}")
-                self.model = YOLO('yolov8n-pose.pt')
+            model_path = Path("models/yolo/yolov8n-pose.pt")
+            if not model_path.exists():
+                logger.info("下载YOLOv8姿态检测模型...")
+                model_path.parent.mkdir(parents=True, exist_ok=True)
+                model = YOLO("yolov8n-pose.pt")
+                model.export(format="pt")
+                logger.info("模型下载完成")
             else:
-                # 检查Python版本兼容性
-                if sys.version_info >= (3, 11):
-                    logger.warning("Python 3.11+检测到，可能需要兼容性处理")
-                    # 临时修改inspect模块
-                    original_getargspec = None
-                    if not hasattr(inspect, 'getargspec'):
-                        original_getargspec = inspect.getargspec
-                        inspect.getargspec = inspect.getfullargspec
-                    
-                    self.model = YOLO(model_path)
-                    
-                    # 恢复原始inspect
-                    if original_getargspec:
-                        inspect.getargspec = original_getargspec
-                else:
-                    self.model = YOLO(model_path)
-            
-            # 设置模型配置
-            self.model.conf = 0.25  # 置信度阈值
-            self.model.iou = 0.45   # NMS IOU阈值
-            self.model.agnostic_nms = True  # 启用agnostic NMS
-            
-            # 将模型移动到指定设备
-            self.model.to(self.device)
-            
-            logger.info("YOLO模型加载成功")
-            
+                model = YOLO(str(model_path))
+            return model
         except Exception as e:
-            logger.error(f"YOLO模型加载失败: {str(e)}")
+            logger.error(f"加载YOLO模型失败: {str(e)}")
             raise
     
     def detect_video(self, video_path: str, output_path: str) -> None:
