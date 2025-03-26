@@ -33,12 +33,18 @@ def setup_colab_environment():
         
         # 激活虚拟环境
         logger.info("激活虚拟环境...")
-        activate_cmd = "source venv/bin/activate"
-        subprocess.run(activate_cmd, shell=True, check=True)
+        # 在Colab中，我们需要修改Python路径来使用虚拟环境
+        venv_python = Path("venv/bin/python")
+        if not venv_python.exists():
+            raise FileNotFoundError("虚拟环境Python解释器未找到")
+            
+        # 将虚拟环境的Python添加到系统路径
+        sys.executable = str(venv_python)
+        sys.prefix = str(venv_python.parent.parent)
         
         # 升级pip
         logger.info("升级pip...")
-        subprocess.run(["pip", "install", "--upgrade", "pip"], check=True)
+        subprocess.run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
         
         # 安装依赖包
         logger.info("安装依赖包...")
@@ -56,7 +62,7 @@ def setup_colab_environment():
         ]
         for package in packages:
             logger.info(f"安装 {package}...")
-            subprocess.run(["pip", "install", package], check=True)
+            subprocess.run([str(venv_python), "-m", "pip", "install", package], check=True)
             
         # 创建必要的目录
         logger.info("创建项目目录...")
