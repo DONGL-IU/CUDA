@@ -26,12 +26,17 @@ logger = logging.getLogger(__name__)
 def get_function_args(func):
     """获取函数参数的兼容性包装器"""
     try:
-        # 使用inspect.signature获取函数参数
         sig = inspect.signature(func)
-        return [param.name for param in sig.parameters.values()]
+        return {
+            'args': list(sig.parameters.keys()),
+            'defaults': tuple(
+                p.default for p in sig.parameters.values()
+                if p.default is not p.empty
+            )
+        }
     except Exception as e:
         logger.warning(f"无法获取函数参数信息: {str(e)}")
-        return []
+        return {'args': [], 'defaults': ()}
 
 def is_colab_environment():
     """检查是否在Google Colab环境中运行"""
