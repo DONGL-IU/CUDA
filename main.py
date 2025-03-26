@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Optional, List
 import h5py
 from tqdm import tqdm
+from google.colab import drive
+from google.colab import files
 
 # 导入各个模块
 from pose_detection import PoseDetector
@@ -19,6 +21,11 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def mount_google_drive():
+    """挂载Google Drive"""
+    drive.mount('/content/drive')
+    logger.info("Google Drive已挂载")
 
 class SMPLPipeline:
     def __init__(self, device: Optional[torch.device] = None):
@@ -140,37 +147,54 @@ class SMPLPipeline:
 
 def main():
     parser = argparse.ArgumentParser(description="SMPL处理流水线")
-    parser.add_argument("--input", type=Path, required=True, help="输入视频文件或目录")
-    parser.add_argument("--output", type=Path, required=True, help="输出目录")
+    parser.add_argument("--input", type=str, required=True, help="Google Drive中的输入视频文件夹路径")
+    parser.add_argument("--output", type=str, required=True, help="Google Drive中的输出目录路径")
     parser.add_argument("--device", type=str, default=None, help="指定设备 (cuda/cpu)")
     parser.add_argument("--visualize", action="store_true", help="是否进行可视化")
     
     args = parser.parse_args()
     
     try:
+        # 挂载Google Drive
+        mount_google_drive()
+        
         # 设置设备
         if args.device:
             device = torch.device(args.device)
         else:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
             
+        # 转换路径为Google Drive路径
+        input_path = Path('/content/drive/MyDrive') / args.input
+        output_path = Path('/content/drive/MyDrive') / args.output
+        
         # 创建输出目录
-        args.output.mkdir(parents=True, exist_ok=True)
+        output_path.mkdir(parents=True, exist_ok=True)
         
         # 初始化流水线
         pipeline = SMPLPipeline(device=device)
         
-        # 处理输入
-        if args.input.is_file():
-            pipeline.process_video(str(args.input), str(args.output))
-        else:
-            pipeline.process_directory(args.input, args.output)
+        # 处理输入目录中的所有视频
+        video_files = list(input_path.glob("*.mp4"))
+        if not video_files:
+            logger.warning(f"在目录 {input_path} 中没有找到视频文件")
+            return 1
             
+        logger.info(f"找到 {len(video_files)} 个视频文件")
+        
+        # 处理每个视频
+        for video_path in tqdm(video_files, desc="处理视频"):
+            try:
+                pipeline.process_video(str(video_path), str(output_path))
+            except Exception as e:
+                logger.error(f"处理视频 {video_path} 时出错: {str(e)}")
+                continue
+                
         # 如果启用了可视化，处理合并后的数据
         if args.visualize:
-            merged_data_path = args.output / "merged_data.h5"
+            merged_data_path = output_path / "merged_data.h5"
             if merged_data_path.exists():
-                pipeline.visualize_results(str(merged_data_path), args.output)
+                pipeline.visualize_results(str(merged_data_path), output_path)
             else:
                 logger.warning("未找到合并后的数据文件，跳过可视化")
                 
