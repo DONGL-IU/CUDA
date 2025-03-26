@@ -22,26 +22,56 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def check_cuda_availability():
+    """检查CUDA是否可用并返回合适的设备"""
+    if not torch.cuda.is_available():
+        logger.warning("CUDA不可用，将使用CPU")
+        return torch.device('cpu')
+    
+    try:
+        # 测试CUDA是否真正可用
+        test_tensor = torch.zeros(1).cuda()
+        logger.info(f"CUDA可用，使用GPU: {torch.cuda.get_device_name(0)}")
+        return torch.device('cuda')
+    except Exception as e:
+        logger.error(f"CUDA初始化失败: {str(e)}")
+        logger.warning("将使用CPU作为备选")
+        return torch.device('cpu')
+
 def mount_google_drive():
     """挂载Google Drive"""
-    drive.mount('/content/drive')
-    logger.info("Google Drive已挂载")
+    try:
+        drive.mount('/content/drive')
+        logger.info("Google Drive已挂载")
+    except Exception as e:
+        logger.error(f"Google Drive挂载失败: {str(e)}")
+        raise
 
 class SMPLPipeline:
     def __init__(self, device: Optional[torch.device] = None):
         """初始化SMPL处理流水线"""
-        if device is None:
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        else:
-            self.device = device
+        try:
+            if device is None:
+                self.device = check_cuda_availability()
+            else:
+                self.device = device
+                
+            logger.info(f"使用设备: {self.device}")
             
-        logger.info(f"使用设备: {self.device}")
-        
-        # 初始化各个模块
-        self.pose_detector = PoseDetector(device=self.device)
-        self.pose_reconstructor = Pose3DReconstructor(device=self.device)
-        self.result_merger = ParallelResultMerger(device=self.device)
-        self.physics_model = SMPLPhysicsModel(device=self.device)
+            # 确保CUDA设备已正确初始化
+            if self.device.type == 'cuda':
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            
+            # 初始化各个模块
+            self.pose_detector = PoseDetector(device=self.device)
+            self.pose_reconstructor = Pose3DReconstructor(device=self.device)
+            self.result_merger = ParallelResultMerger(device=self.device)
+            self.physics_model = SMPLPhysicsModel(device=self.device)
+            
+        except Exception as e:
+            logger.error(f"初始化SMPL流水线失败: {str(e)}")
+            raise
         
     def process_video(self, video_path: str, output_dir: str) -> None:
         """处理单个视频文件"""
@@ -160,9 +190,16 @@ def main():
         
         # 设置设备
         if args.device:
-            device = torch.device(args.device)
+            try:
+                device = torch.device(args.device)
+                if device.type == 'cuda' and not torch.cuda.is_available():
+                    logger.warning("指定的CUDA设备不可用，将使用CPU")
+                    device = torch.device('cpu')
+            except Exception as e:
+                logger.error(f"设备设置失败: {str(e)}")
+                device = torch.device('cpu')
         else:
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            device = check_cuda_availability()
             
         # 转换路径为Google Drive路径
         input_path = Path('/content/drive/MyDrive') / args.input
@@ -186,6 +223,9 @@ def main():
         for video_path in tqdm(video_files, desc="处理视频"):
             try:
                 pipeline.process_video(str(video_path), str(output_path))
+                # 在每个视频处理完后清理GPU内存
+                if device.type == 'cuda':
+                    torch.cuda.empty_cache()
             except Exception as e:
                 logger.error(f"处理视频 {video_path} 时出错: {str(e)}")
                 continue
@@ -205,4 +245,9 @@ def main():
     return 0
 
 if __name__ == "__main__":
-    exit(main()) 
+    exit(main())
+
+print(f"PyTorch版本: {torch.__version__}")
+print(f"CUDA是否可用: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"CUDA版本: {torch.version.cuda}") 
