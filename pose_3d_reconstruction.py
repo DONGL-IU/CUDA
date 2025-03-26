@@ -5,10 +5,10 @@ import numpy as np
 import pandas as pd
 import h5py
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import Dict, List, Optional, Tuple, Any, Union, TypeVar
 import logging
 from tqdm import tqdm
-import smplx
+from smplx import SMPL
 import cv2
 
 # 配置日志
@@ -27,7 +27,7 @@ class Pose3DReconstructor:
             
             # 加载SMPL模型
             logger.info("加载SMPL模型...")
-            self.smpl = smplx.SMPL(
+            self.smpl = SMPL(
                 model_path='models/smpl',
                 gender='neutral',
                 batch_size=1,
